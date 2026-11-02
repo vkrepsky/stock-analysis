@@ -12,7 +12,7 @@ Pipeline em Python que monta uma base com todas as empresas listadas e aplica a 
 ## Como rodar (na sua máquina, com internet)
 ```bash
 pip install pandas numpy requests yfinance
-python src/run_all.py           # roda tudo (01 a 05); use --de N / --ate N / --so N para parte
+python src/run_all.py           # roda tudo (01 a 06; o 06 gera data/out/relatorio_diagnostico.md, pequeno, para enviar ao Claude); use --de N / --ate N / --so N para parte
 
 # ou passo a passo:
 python src/01_baixar_cvm.py     # ~100-200 MB, com cache
