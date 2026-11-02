@@ -9,9 +9,25 @@ Pipeline em Python que monta uma base com todas as empresas listadas e aplica a 
 | Tickers e situação (recuperação judicial etc.) | CVM (FCA e cadastro) | `01`, `03` |
 | Preço, volume, dividendos, Ibovespa | Yahoo Finance via `yfinance` | `03` |
 
+## Preparar o ambiente (uma vez)
+Precisa de Python 3.10+ e internet. Na pasta do projeto, crie e ative um ambiente virtual e instale as dependências:
+
+```bash
+# Windows (cmd)
+python -m venv .venv
+.venv\Scripts\activate
+# Windows (PowerShell): .venv\Scripts\Activate.ps1
+
+# Linux / macOS
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -r requirements.txt
+```
+Com o venv ativo o prompt mostra `(.venv)`. Em outro terminal, ative de novo antes de rodar (`.venv\Scripts\activate` ou `source .venv/bin/activate`). Para sair: `deactivate`. A pasta `.venv/` não vai para o git.
+
 ## Como rodar (na sua máquina, com internet)
 ```bash
-pip install pandas numpy requests yfinance
 python src/run_all.py           # roda tudo (01 a 06; o 06 gera data/out/relatorio_diagnostico.md, pequeno, para enviar ao Claude); use --de N / --ate N / --so N para parte
 
 # ou passo a passo:
