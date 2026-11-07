@@ -47,9 +47,10 @@ Ajuste anos e janelas em `src/common.py` (`ANOS_DFP`, `ANO_ITR`) e os critérios
 - Ranking: percentis de valuation (30%), estabilidade (25%), balanço (20%), dividendos (15%), qualidade (10%), com teste de sensibilidade dos pesos.
 
 ## Limites conhecidos
-- Dívida financeira = contas 2.01.04 + 2.02.01 do passivo; arrendamentos são identificados pelo texto da conta ("arrendamento"/"leasing"), então podem faltar em alguns balanços.
-- EBITDA = EBIT (3.05) + depreciação/amortização da DVA (7.04.01); empresas sem essas contas ficam sem EBITDA.
-- Valor de mercado = preço por classe x ações da CVM; para quem só tem unit, usa o valor de mercado do Yahoo.
+- Dívida financeira = contas 2.01.04 + 2.02.01 do passivo, sem arrendamentos. Arrendamentos são procurados pelo texto da conta ("arrendamento"/"leasing"/"direito de uso") em todo o passivo 2.01.* e 2.02.* (muitas empresas lançam fora de empréstimos); a parte que já está dentro de 2.01.04/2.02.01 sai da dívida financeira para não contar duas vezes. Se o texto da conta for diferente, o arrendamento pode faltar.
+- EBITDA = EBIT (3.05) + depreciação/amortização da DVA (7.04.01, que a CVM traz NEGATIVA: usamos o módulo); empresas sem essas contas ficam sem EBITDA.
+- Lucro dos controladores = 3.11.01; se vier 0 com o total (3.11) diferente de 0 (empresa que só preenche o total), vale 3.11 - 3.11.02.
+- Valor de mercado = preço por classe x ações da CVM; para quem só tem unit, usa preço da unit x ações ON (aproximação; o valor do Yahoo fica só para comparação). A composição de capital da CVM não informa a escala e parte das empresas preenche em milhares: o passo 4 detecta (P/VP ou P/L < 0,05, ou unit ~1/1000 do Yahoo), multiplica por 1000 e lista os tickers corrigidos (coluna `acoes_em_mil`). Não detecta empresas sem lucro e sem PL positivos.
 - Preços do Yahoo podem ter falhas; o script lista os tickers sem dados.
 - Seguradoras e holdings entram, mas dívida/EBITDA não é comparável para elas.
 - Janela de preço de ~2 anos: dá para triar hoje, mas não para um backtest longo.

@@ -1,7 +1,7 @@
 """Passo 2: lê os zips da CVM e monta data/out/fundamentos.csv (1 linha por empresa).
 
 Anos 2021-2025 (DFP): lucro atribuível aos controladores (ll), receita, EBIT, D&A (da, vem da DVA),
-caixa, dívida financeira (div_fin, sem arrendamentos), arrendamentos (div_arr), PL dos
+caixa, dívida financeira (div_fin, sem arrendamentos), arrendamentos (div_arr, em todo o passivo), PL dos
 controladores e ativo. LTM: último ITR do ano corrente
 (12 meses = exercício anterior + acumulado atual - acumulado do ano anterior).
 
@@ -12,10 +12,11 @@ import zipfile
 import pandas as pd
 
 from common import ANO_ITR, ANOS_DFP, OUT, RAW
-from cvm_lib import ler_demonstracao, serie, soma_filhas
+from cvm_lib import ler_demonstracao, passivo_arrendamento, serie
 
 ULT, PEN = "ÚLTIMO", "PENÚLTIMO"
-EH_ARR = r"arrendamento|leasing"
+EH_ARR = r"arrendamento|leasing|direitos? de uso"
+CODIGOS = {"receita": "3.01", "ebit": "3.05"}
 
 
 def combina(*ss):
@@ -23,9 +24,25 @@ def combina(*ss):
     return pd.concat(ss, axis=1).sum(axis=1, min_count=1)
 
 
-def primeira(*ss):
-    """Primeiro valor não nulo, série a série (ex.: 3.11.01 e, na falta, 3.11)."""
-    return pd.concat(ss, axis=1).bfill(axis=1).iloc[:, 0]
+def lucro_controladores(dre):
+    """Lucro atribuível aos controladores (3.11.01).
+
+    Algumas empresas só preenchem o total (3.11) e deixam 3.11.01 e 3.11.02 em 0 (ex.: Klabin, Sabesp):
+    pegar o 0 como se fosse o lucro zerava o resultado. Nesse caso (ou se 3.11.01 faltar), vale
+    3.11 - 3.11.02 (total menos minoritários).
+    """
+    t = pd.DataFrame({"ctrl": serie(dre, "3.11.01"), "nc": serie(dre, "3.11.02"), "total": serie(dre, "3.11")})
+    sem_ctrl = t["ctrl"].isna() | ((t["ctrl"] == 0) & (t["total"].fillna(0) != 0))
+    return t["ctrl"].where(~sem_ctrl, t["total"] - t["nc"].fillna(0))
+
+
+def extrair(nome, df):
+    """Conta `nome` por empresa; df já filtrado por período/ordem. D&A em módulo."""
+    if nome == "ll":
+        return lucro_controladores(df)
+    if nome == "da":  # a DVA lança a depreciação (7.04.01) como retenção, ou seja, NEGATIVA
+        return serie(df, "7.04.01").abs()
+    return serie(df, CODIGOS[nome])
 
 
 def balanco(zp):
@@ -36,19 +53,21 @@ def balanco(zp):
         df = df[df["ORDEM_EXERC"] == ULT]
         ultimos.append(df[df["DT_REFER"] == df.groupby("CNPJ_CIA")["DT_REFER"].transform("max")])
     bpa, bpp = ultimos
+    arr = passivo_arrendamento(bpp, EH_ARR)
     res = pd.DataFrame({
         "dt_balanco": bpa.groupby("CNPJ_CIA")["DT_REFER"].max(),
         "caixa": combina(serie(bpa, "1.01.01"), serie(bpa, "1.01.02")),
         "div_total": combina(serie(bpp, "2.01.04"), serie(bpp, "2.02.01")),
-        "div_arr": soma_filhas(bpp, r"^2\.(01\.04|02\.01)\.\d+$", EH_ARR),
+        "div_arr": arr["arr"],
+        "arr_em_divida": arr["arr_em_divida"],
         "pl_total": serie(bpp, "2.03"),
         "pl_nc": serie(bpp, "2.03.09"),
         "ativo": serie(bpa, "1"),
     })
-    res["div_arr"] = res["div_arr"].fillna(0.0)
-    res["div_fin"] = res["div_total"] - res["div_arr"]
+    res[["div_arr", "arr_em_divida"]] = res[["div_arr", "arr_em_divida"]].fillna(0.0)
+    res["div_fin"] = res["div_total"] - res["arr_em_divida"]    # arrendamento fora de 2.01.04/2.02.01 não está em div_total
     res["pl_ctrl"] = res["pl_total"] - res["pl_nc"].fillna(0.0)
-    return res.drop(columns=["div_total", "pl_total", "pl_nc"])
+    return res.drop(columns=["div_total", "pl_total", "pl_nc", "arr_em_divida"])
 
 
 def resultado_anual(zp):
@@ -57,10 +76,10 @@ def resultado_anual(zp):
     dva = ler_demonstracao(zp, "DVA")
     dva = dva[dva["ORDEM_EXERC"] == ULT]
     return pd.DataFrame({
-        "ll": primeira(serie(dre, "3.11.01"), serie(dre, "3.11")),
-        "receita": serie(dre, "3.01"),
-        "ebit": serie(dre, "3.05"),
-        "da": serie(dva, "7.04.01"),
+        "ll": extrair("ll", dre),
+        "receita": extrair("receita", dre),
+        "ebit": extrair("ebit", dre),
+        "da": extrair("da", dva),
     })
 
 
@@ -75,15 +94,9 @@ def resultado_ltm(zp, fy):
         inicio_ano = (df["DT_INI_EXERC"].dt.month == 1) & (df["DT_INI_EXERC"].dt.day == 1)
         return df[(df["ORDEM_EXERC"] == ordem) & inicio_ano]
 
-    contas = {
-        "ll": (dre, ("3.11.01", "3.11")),
-        "receita": (dre, ("3.01",)),
-        "ebit": (dre, ("3.05",)),
-        "da": (dva, ("7.04.01",)),
-    }
-    for nome, (df, codigos) in contas.items():
-        atual = primeira(*[serie(acumulado(df, ULT), c) for c in codigos])
-        anterior = primeira(*[serie(acumulado(df, PEN), c) for c in codigos])
+    for nome, df in {"ll": dre, "receita": dre, "ebit": dre, "da": dva}.items():
+        atual = extrair(nome, acumulado(df, ULT))
+        anterior = extrair(nome, acumulado(df, PEN))
         res[f"{nome}_ltm"] = fy[nome] + atual - anterior
     return res
 
