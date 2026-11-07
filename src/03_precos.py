@@ -1,6 +1,7 @@
 """Passo 3: lista os tickers (FCA da CVM) e baixa preços e dividendos no Yahoo Finance.
 
-Saídas em data/out/: tickers.csv, precos_resumo.csv, dividendos_ano.csv, precos_diarios.csv.gz
+Saídas em data/out/: tickers.csv, precos_resumo.csv, dividendos_ano.csv, dividendos_extraordinarios.csv,
+precos_diarios.csv.gz
 Uso:  pip install yfinance  &&  python src/03_precos.py      (precisa de internet)
 """
 import re
@@ -52,18 +53,35 @@ def tickers_fca():
     return t.reset_index(drop=True)
 
 
-def dividendos_12m(df, fim):
-    """(total, recorrente) pagos nos últimos 12 meses (R$ por ação).
+def classificar_dividendos(df, fim):
+    """Pagamentos dos últimos 12 meses (R$ por ação) com a marca `extra`.
 
-    Recorrente = total sem os pagamentos extraordinários: os que passam de EXTRA_VEZES x a mediana dos
-    pagamentos dos últimos 3 anos (ex.: GRND3 pagou R$ 1,09 em dez/2025 contra ~R$ 0,09 nos demais,
-    73% do que a janela somava). Quem paga uma vez por ano tem mediana = o próprio pagamento: nada sai.
+    Extraordinário = passa de EXTRA_VEZES x a mediana dos pagamentos dos últimos 3 anos (ex.: GRND3 pagou
+    R$ 1,09 em dez/2025 contra ~R$ 0,09 nos demais, 73% do que a janela somava). Quem paga uma vez por ano
+    tem mediana = o próprio pagamento: nada sai. Limite conhecido: quem mistura pagamentos pequenos e
+    frequentes (JCP trimestral) com um grande por ano pode ter o grande tratado como extraordinário.
     """
     pagos = df["Dividends"][df["Dividends"] > 0]
     h12 = pagos[pagos.index > fim - pd.Timedelta(days=365)]
     ref = pagos[pagos.index > fim - pd.Timedelta(days=3 * 365)]
-    corte = EXTRA_VEZES * ref.median() if len(ref) else 0.0
-    return float(h12.sum()), float(h12[h12 <= corte].sum())
+    mediana = float(ref.median()) if len(ref) else 0.0
+    return pd.DataFrame({"valor": h12, "mediana_3a": mediana, "extra": h12 > EXTRA_VEZES * mediana})
+
+
+def dividendos_12m(df, fim):
+    """(total, recorrente) pagos nos últimos 12 meses (R$ por ação)."""
+    c = classificar_dividendos(df, fim)
+    return float(c["valor"].sum()), float(c.loc[~c["extra"], "valor"].sum())
+
+
+def pagamentos_extraordinarios(tk, df):
+    """Pagamentos de 12 meses tratados como extraordinários (trilha de auditoria do dy_12m_rec)."""
+    df = df.dropna(subset=["Close"])
+    c = classificar_dividendos(df, df.index.max())
+    c = c[c["extra"]].drop(columns="extra")
+    out = c.reset_index(names="data").assign(ticker=tk, vezes=lambda z: z["valor"] / z["mediana_3a"])
+    out["data"] = out["data"].dt.strftime("%Y-%m-%d")
+    return out[["ticker", "data", "valor", "mediana_3a", "vezes"]]
 
 
 def resumo_ticker(tk, df):
@@ -109,7 +127,7 @@ def main():
     t.to_csv(OUT / "tickers.csv", index=False)
     print(f"{len(t)} tickers em {t['cnpj'].nunique()} empresas")
 
-    resumos, divs, diarios, falhas = [], [], [], []
+    resumos, divs, diarios, extras, falhas = [], [], [], [], []
     lista = t["ticker"].tolist()
     for i in range(0, len(lista), LOTE):
         lote = lista[i:i + LOTE]
@@ -131,12 +149,14 @@ def main():
                 continue
             resumos.append(r)
             divs.append(d)
+            extras.append(pagamentos_extraordinarios(tk, df))
             x = df.dropna(subset=["Close"]).tail(520)[["Close", "Adj Close", "Volume"]].assign(ticker=tk)
             diarios.append(x.reset_index())
         print(f"  {min(i + LOTE, len(lista))}/{len(lista)}")
         time.sleep(2)
 
     pd.DataFrame(resumos).to_csv(OUT / "precos_resumo.csv", index=False)
+    pd.concat(extras).to_csv(OUT / "dividendos_extraordinarios.csv", index=False)
     mcap_units(t).to_csv(OUT / "mcap_units.csv", index=False)
     try:  # Ibovespa, para medir a queda relativa ao mercado
         ib = yf.download("^BVSP", start=INICIO, interval="1d", auto_adjust=False, progress=False)

@@ -233,6 +233,17 @@ def main():
             return
         tabela(q[cols].apply(mi), 25)
 
+    @secao("12. Pagamentos tratados como extraordinários (empresas com dy_12m - dy_12m_rec >= 2 p.p.)")
+    def _():
+        e = pd.read_csv(OUT / "dividendos_extraordinarios.csv")
+        d = df[(df["dy_12m"] - df["dy_12m_rec"]) >= 0.02]
+        x = e[e["ticker"].isin(d["ticker"])].merge(d[["ticker", "preco", "dy_12m", "dy_12m_rec"]], on="ticker")
+        x["pct_preco"] = x["valor"] / x["preco"]
+        txt(f"{d['ticker'].nunique()} empresas; 'vezes' = pagamento / mediana dos pagamentos dos últimos 3 anos "
+            f"(corte = 5x). Confira se o que saiu é mesmo pontual.")
+        cols = ["ticker", "data", "valor", "mediana_3a", "vezes", "pct_preco", "dy_12m", "dy_12m_rec"]
+        tabela(x.sort_values("pct_preco", ascending=False)[cols].round(3), 40)
+
     destino = OUT / "relatorio_diagnostico.md"
     destino.write_text("\n".join(SAIDA), encoding="utf-8")
     print(f"Gravado: {destino} ({destino.stat().st_size / 1e3:.0f} KB). Envie este arquivo + o log do terminal ao Claude.")
