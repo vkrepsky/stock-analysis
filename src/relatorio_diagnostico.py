@@ -217,7 +217,7 @@ def main():
             a = pd.read_csv(OUT / arq)
             txt(f"**{arq}**: {len(a)}")
             if len(a):
-                tabela(a[[c for c in ("ticker", "ret_12m", "dl_ebitda_com_arr", "p_l", "score", "falhou") if c in a]], 10)
+                tabela(a[[c for c in ("ticker", "ret_12m", "dl_ebitda_com_arr", "p_l", "p_vp", "dy_12m", "score", "falhou") if c in a]], 40)
 
     destino = OUT / "relatorio_diagnostico.md"
     destino.write_text("\n".join(SAIDA), encoding="utf-8")
