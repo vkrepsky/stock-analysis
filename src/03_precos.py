@@ -17,6 +17,9 @@ from common import OUT, RAW
 INICIO = "2020-12-01"
 LOTE = 25
 EXTRA_VEZES = 5      # pagamento > 5x a mediana dos pagamentos dos últimos 3 anos = extraordinário
+RETRIES = 2          # rodadas extras para os tickers que o Yahoo não devolveu (falha intermitente)
+LOTE_RETRY = 5
+PAUSA_RETRY = 20     # segundos (multiplicado pelo número da rodada)
 
 
 def norm(s):
@@ -121,39 +124,79 @@ def mcap_units(t):
     return pd.DataFrame(saida, columns=["ticker", "mcap_yahoo"])
 
 
+def processar_lote(lote):
+    """Baixa um lote no Yahoo. Devolve (ok, falhos); ok[ticker] = (resumo, dividendos_ano, extras, diario)."""
+    try:
+        dados = yf.download([x + ".SA" for x in lote], start=INICIO, interval="1d", auto_adjust=False,
+                            actions=True, group_by="ticker", threads=True, progress=False)
+    except Exception as e:  # noqa: BLE001
+        print("  lote falhou:", e)
+        return {}, list(lote)
+    ok, falhos = {}, []
+    for tk in lote:
+        try:
+            df = dados[tk + ".SA"] if isinstance(dados.columns, pd.MultiIndex) else dados
+            r, d = resumo_ticker(tk, df)
+        except Exception:  # noqa: BLE001
+            r = None
+        if r is None:
+            falhos.append(tk)
+            continue
+        x = df.dropna(subset=["Close"]).tail(520)[["Close", "Adj Close", "Volume"]].assign(ticker=tk)
+        ok[tk] = (r, d, pagamentos_extraordinarios(tk, df), x.reset_index())
+    return ok, falhos
+
+
+def baixar_tudo(lista):
+    """Baixa todos os tickers. O Yahoo falha de forma intermitente e o erro ("possibly delisted") é o mesmo
+    de um ticker extinto; por isso quem falhou é tentado de novo, em lotes menores e com pausa. Para quando
+    uma rodada não recupera nenhum (os que sobram são, de fato, tickers sem dados)."""
+    resultados, falhas = {}, []
+    for i in range(0, len(lista), LOTE):
+        ok, falhos = processar_lote(lista[i:i + LOTE])
+        resultados.update(ok)
+        falhas += falhos
+        print(f"  {min(i + LOTE, len(lista))}/{len(lista)}")
+        time.sleep(2)
+    for rodada in range(1, RETRIES + 1):
+        if not falhas:
+            break
+        print(f"  nova tentativa {rodada}/{RETRIES} para {len(falhas)} tickers sem dados")
+        time.sleep(PAUSA_RETRY * rodada)
+        pendentes, falhas = falhas, []
+        for i in range(0, len(pendentes), LOTE_RETRY):
+            ok, falhos = processar_lote(pendentes[i:i + LOTE_RETRY])
+            resultados.update(ok)
+            falhas += falhos
+            time.sleep(2)
+        if len(falhas) == len(pendentes):
+            break
+    return resultados, falhas
+
+
+def avisar_sumidos(antigos, falhas):
+    """Tickers que tinham dados na execução anterior e agora ficaram sem: sinal de Yahoo instável."""
+    sumiram = sorted(set(antigos) & set(falhas))
+    if sumiram:
+        print(f"ATENÇÃO: {len(sumiram)} tickers que tinham dados na execução anterior ficaram sem: "
+              f"{' '.join(sumiram)}\n  Pode ser instabilidade do Yahoo: rode o passo 3 de novo antes de usar o resultado.")
+    return sumiram
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     t = tickers_fca()
     t.to_csv(OUT / "tickers.csv", index=False)
     print(f"{len(t)} tickers em {t['cnpj'].nunique()} empresas")
+    antigos = pd.read_csv(OUT / "precos_resumo.csv")["ticker"].tolist() if (OUT / "precos_resumo.csv").exists() else []
 
-    resumos, divs, diarios, extras, falhas = [], [], [], [], []
     lista = t["ticker"].tolist()
-    for i in range(0, len(lista), LOTE):
-        lote = lista[i:i + LOTE]
-        try:
-            dados = yf.download([x + ".SA" for x in lote], start=INICIO, interval="1d", auto_adjust=False,
-                                actions=True, group_by="ticker", threads=True, progress=False)
-        except Exception as e:  # noqa: BLE001
-            print("  lote falhou:", e)
-            falhas += lote
-            continue
-        for tk in lote:
-            try:
-                df = dados[tk + ".SA"] if isinstance(dados.columns, pd.MultiIndex) else dados
-                r, d = resumo_ticker(tk, df)
-            except Exception:  # noqa: BLE001
-                r = None
-            if r is None:
-                falhas.append(tk)
-                continue
-            resumos.append(r)
-            divs.append(d)
-            extras.append(pagamentos_extraordinarios(tk, df))
-            x = df.dropna(subset=["Close"]).tail(520)[["Close", "Adj Close", "Volume"]].assign(ticker=tk)
-            diarios.append(x.reset_index())
-        print(f"  {min(i + LOTE, len(lista))}/{len(lista)}")
-        time.sleep(2)
+    resultados, falhas = baixar_tudo(lista)
+    ordem = [tk for tk in lista if tk in resultados]
+    resumos = [resultados[tk][0] for tk in ordem]
+    divs = [resultados[tk][1] for tk in ordem]
+    extras = [resultados[tk][2] for tk in ordem]
+    diarios = [resultados[tk][3] for tk in ordem]
 
     pd.DataFrame(resumos).to_csv(OUT / "precos_resumo.csv", index=False)
     pd.concat(extras).to_csv(OUT / "dividendos_extraordinarios.csv", index=False)
@@ -168,6 +211,7 @@ def main():
     pd.concat(divs, axis=1).T.to_csv(OUT / "dividendos_ano.csv", index_label="ticker")
     pd.concat(diarios).to_csv(OUT / "precos_diarios.csv.gz", index=False)
     print(f"Sem dados no Yahoo: {len(falhas)} tickers -> {falhas[:40]}")
+    avisar_sumidos(antigos, falhas)
 
 
 if __name__ == "__main__":
