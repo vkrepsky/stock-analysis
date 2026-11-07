@@ -51,7 +51,9 @@ def componentes(u, dle):
     c["valuation"] = 0.5 * (u["ll_ltm"] / u["valor_mercado"]).rank(pct=True) + 0.5 * (1 / u["p_vp"]).rank(pct=True)
     c["estabilidade"] = cv.rank(pct=True, ascending=False)
     c["balanco"] = u[dle].rank(pct=True, ascending=False)
-    c["dividendos"] = u["dy_12m"].rank(pct=True) * np.where(u["payout_12m"] > 1.0, 0.5, 1.0)
+    dy = u["dy_12m_rec"] if "dy_12m_rec" in u else u["dy_12m"]          # recorrente: extraordinário não conta
+    payout = u["payout_12m_rec"] if "payout_12m_rec" in u else u["payout_12m"]
+    c["dividendos"] = dy.rank(pct=True) * np.where(payout > 1.0, 0.5, 1.0)
     c["qualidade"] = u["roe_ltm"].rank(pct=True)
     return c.fillna(0.0)
 
@@ -66,7 +68,7 @@ def freq_top(c, top, n=2000, seed=0):
 
 def mostrar(d, extra=()):
     cols = ["ticker", "DENOM_SOCIAL", "preco", "ret_12m", "dist_max_52w", "dl_ebitda_com_arr", "p_l", "p_vp",
-            "dy_12m", "score", "freq_top"] + list(extra)
+            "dy_12m", "dy_12m_rec", "score", "freq_top"] + list(extra)
     d = d[[c for c in cols if c in d]].copy()
     if "DENOM_SOCIAL" in d:
         d["DENOM_SOCIAL"] = d["DENOM_SOCIAL"].astype(str).str[:24]

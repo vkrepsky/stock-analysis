@@ -52,5 +52,6 @@ Ajuste anos e janelas em `src/common.py` (`ANOS_DFP`, `ANO_ITR`) e os critérios
 - Lucro dos controladores = 3.11.01; se vier 0 com o total (3.11) diferente de 0 (empresa que só preenche o total), vale 3.11 - 3.11.02.
 - Valor de mercado = preço por classe x ações da CVM; para quem só tem unit, usa preço da unit x ações ON (aproximação; o valor do Yahoo fica só para comparação). A composição de capital da CVM não informa a escala e parte das empresas preenche em milhares: o passo 4 detecta (P/VP ou P/L < 0,05, ou unit ~1/1000 do Yahoo), multiplica por 1000 e lista os tickers corrigidos (coluna `acoes_em_mil`). Não detecta empresas sem lucro e sem PL positivos.
 - Preços do Yahoo podem ter falhas; o script lista os tickers sem dados.
+- Dividendos: `dy_12m` soma tudo o que foi pago em 12 meses; `dy_12m_rec` exclui pagamentos extraordinários (mais de 5x a mediana dos pagamentos dos últimos 3 anos) e é o que o ranking usa, junto com `payout_12m_rec`. Quem muda o padrão de pagamento de verdade (ex.: passa a pagar bem mais) fica subestimado.
 - Seguradoras e holdings entram, mas dívida/EBITDA não é comparável para elas.
 - Janela de preço de ~2 anos: dá para triar hoje, mas não para um backtest longo.

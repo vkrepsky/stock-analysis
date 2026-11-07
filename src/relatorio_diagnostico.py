@@ -165,7 +165,9 @@ def main():
         marca("dívida financeira < 0 (arrendamento > dívida total)", df["div_fin_ltm"] < 0)
         marca("valor de mercado > R$ 1 tri", df["valor_mercado"] > 1e12)
         marca("P/L < 1", df["p_l"] < 1)
-        marca("DY > 30%", df["dy_12m"] > 0.30)
+        marca("DY > 30% (total pago em 12 meses)", df["dy_12m"] > 0.30)
+        if "dy_12m_rec" in df:
+            marca("DY recorrente > 30% (sem extraordinários; investigar)", df["dy_12m_rec"] > 0.30)
         marca("ações ON+PN = 0", (df["acoes_on"].fillna(0) + df["acoes_pn"].fillna(0)) <= 0)
         marca("P/L ou P/VP < 0,05 (escala das ações; deveria ser 0)", (df["p_l"] < 0.05) | (df["p_vp"] < 0.05))
         if "escala_duvidosa" in df:
@@ -219,7 +221,7 @@ def main():
             a = pd.read_csv(OUT / arq)
             txt(f"**{arq}**: {len(a)}")
             if len(a):
-                tabela(a[[c for c in ("ticker", "ret_12m", "dl_ebitda_com_arr", "p_l", "p_vp", "dy_12m", "score", "falhou") if c in a]], 40)
+                tabela(a[[c for c in ("ticker", "ret_12m", "dl_ebitda_com_arr", "p_l", "p_vp", "dy_12m", "dy_12m_rec", "score", "falhou") if c in a]], 40)
 
     @secao("11. Lucro por ano (R$ mi) das quase aprovadas que só falham em lucro_estavel")
     def _():

@@ -114,8 +114,11 @@ def main():
     df["p_l"] = np.where(df["ll_ltm"] > 0, df["valor_mercado"] / df["ll_ltm"], np.nan)
     df["p_vp"] = np.where(df["pl_ctrl_ltm"] > 0, df["valor_mercado"] / df["pl_ctrl_ltm"], np.nan)
     df["roe_ltm"] = df["ll_ltm"] / df["pl_ctrl_ltm"]
-    df["dy_12m"] = df["div_12m_p"] / df["preco_p"]
+    df["dy_12m"] = df["div_12m_p"] / df["preco_p"]                       # tudo o que foi pago em 12 meses
+    rec = df["div_12m_rec_p"] if "div_12m_rec_p" in df else df["div_12m_p"]
+    df["dy_12m_rec"] = rec / df["preco_p"]                                # sem pagamentos extraordinários
     df["payout_12m"] = df["dy_12m"] * df["valor_mercado"] / df["ll_ltm"]
+    df["payout_12m_rec"] = df["dy_12m_rec"] * df["valor_mercado"] / df["ll_ltm"]
 
     df = df.rename(columns={c: c[:-2] for c in df.columns if c.endswith("_p") and c != "ll_p"})
     df.to_csv(OUT / "b3_dataset.csv")
