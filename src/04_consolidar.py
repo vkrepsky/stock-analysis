@@ -9,6 +9,7 @@ import pandas as pd
 from common import ANOS_DFP, OUT
 
 LIMITE_ESCALA = 0.05   # P/VP ou P/L abaixo disso é impossível na prática: a CVM trouxe as ações em milhares
+LIMITE_VM_MAX = 1e12   # nenhuma empresa da B3 vale R$ 1 tri: acima disso o valor de mercado está errado
 
 
 def corrigir_escala_acoes(df):
@@ -17,17 +18,27 @@ def corrigir_escala_acoes(df):
     A composição do capital da CVM não traz escala e parte das empresas preenche em milhares (Renner:
     961 mil ações, ABEV3: 15 milhões), o que deixava o valor de mercado 1000x menor e o P/L e P/VP ~0.
     Sinais (qualquer um): P/VP ou P/L < LIMITE_ESCALA com lucro/PL positivos; ou, para units, valor de
-    mercado ~1/1000 do valor do Yahoo. Devolve a máscara das empresas corrigidas.
+    mercado ~1/1000 do valor do Yahoo. Só corrige se o resultado couber em LIMITE_VM_MAX (HAPV3: x1000 dava
+    R$ 2 tri). Se mesmo assim o valor de mercado seguir implausível (P/VP ou P/L < LIMITE_ESCALA, ou acima do
+    teto), ele é anulado (NaN) em vez de contaminar P/L, P/VP e o ranking.
+    Devolve as máscaras (corrigidas, anuladas).
     """
     vm = df["valor_mercado"]
     pl = df["pl_ctrl_ltm"].where(df["pl_ctrl_ltm"] > 0)
     ll = df["ll_ltm"].where(df["ll_ltm"] > 0)
     mil = (vm / pl < LIMITE_ESCALA) | (vm / ll < LIMITE_ESCALA) | (vm / df["mcap_yahoo"]).between(2e-4, 4e-3)
+    mil &= vm * 1000 <= LIMITE_VM_MAX
     cols = ["acoes_on", "acoes_pn", "valor_mercado"]
     df.loc[mil, cols] = df.loc[mil, cols] * 1000
-    df["acoes_em_mil"] = mil
     df.loc[mil, "mcap_fonte"] += "_x1000"
-    return mil
+    vm = df["valor_mercado"]
+    duvidosa = (vm / pl < LIMITE_ESCALA) | (vm / ll < LIMITE_ESCALA) | (vm > LIMITE_VM_MAX)
+    df.loc[duvidosa, "valor_mercado"] = np.nan
+    df.loc[duvidosa, "mcap_fonte"] += "_anulado"
+    mil &= ~duvidosa
+    df["acoes_em_mil"] = mil
+    df["escala_duvidosa"] = duvidosa
+    return mil, duvidosa
 
 
 def checagens(df):
@@ -83,10 +94,12 @@ def main():
         df["mcap_yahoo"] = mu.groupby("cnpj")["mcap_yahoo"].max().reindex(df.index)
     df.loc[so_unit, "valor_mercado"] = df["preco_p"] * df["acoes_on"]
     df.loc[so_unit, "mcap_fonte"] = "unit_x_acoes_on"
-    mil = corrigir_escala_acoes(df)
+    mil, duvidosa = corrigir_escala_acoes(df)
     print(f"Ações informadas em milhares na CVM (corrigidas x1000): {int(mil.sum())} empresas")
     if mil.any():
         print("  " + " ".join(df.loc[mil, "ticker"]))
+    if duvidosa.any():
+        print(f"Valor de mercado anulado por escala duvidosa: {int(duvidosa.sum())} -> " + " ".join(df.loc[duvidosa, "ticker"]))
     razao = df["valor_mercado"] / df["mcap_yahoo"]
     df["mcap_divergente"] = so_unit & ((razao > 1.5) | (razao < 0.67))
     df = df.join(dv, on="ticker")

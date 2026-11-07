@@ -14,7 +14,7 @@ def ler_demonstracao(zip_path, tipo):
 
     - valores em R$ (aplica ESCALA_MOEDA);
     - só a última VERSAO de cada empresa/data de referência;
-    - usa o consolidado quando a empresa tem; senão, o individual.
+    - usa o consolidado quando a empresa tem (e ele não é um registro zerado); senão, o individual.
     """
     zip_path = Path(zip_path)
     quadros = []
@@ -40,8 +40,15 @@ def ler_demonstracao(zip_path, tipo):
         if c in df:
             df[c] = pd.to_datetime(df[c], errors="coerce")
     df["VERSAO"] = pd.to_numeric(df["VERSAO"], errors="coerce").fillna(0)
-    tem_con = df.loc[df["consol"] == "con", "CNPJ_CIA"].unique()
-    df = df[(df["consol"] == "con") | (~df["CNPJ_CIA"].isin(tem_con))]
+    # consolidado quando a empresa tem; senão, individual. Exceção: consolidado que é só um registro zerado
+    # (TIM S.A. em 2024/2025: todas as contas 0 e o individual com os valores reais) -> vale o individual
+    # daquele exercício.
+    eh_con = df["consol"] == "con"
+    chave = df["CNPJ_CIA"].str.cat(df["ORDEM_EXERC"].fillna(""), sep="|")
+    con_util = chave[eh_con & (df["VL_CONTA"].abs() > 0)]
+    ind_vale = ~eh_con & ~chave.isin(con_util) & (chave.isin(chave[eh_con]) | ~df["CNPJ_CIA"].isin(df.loc[eh_con, "CNPJ_CIA"]))
+    usa_ind = chave.isin(chave[ind_vale])
+    df = df[(eh_con & ~usa_ind) | (~eh_con & usa_ind)]
     vmax = df.groupby(["CNPJ_CIA", "DT_REFER"])["VERSAO"].transform("max")
     return df[df["VERSAO"] == vmax].reset_index(drop=True)
 
