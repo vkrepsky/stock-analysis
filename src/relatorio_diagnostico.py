@@ -168,6 +168,8 @@ def main():
         marca("DY > 30%", df["dy_12m"] > 0.30)
         marca("ações ON+PN = 0", (df["acoes_on"].fillna(0) + df["acoes_pn"].fillna(0)) <= 0)
         marca("P/L ou P/VP < 0,05 (escala das ações; deveria ser 0)", (df["p_l"] < 0.05) | (df["p_vp"] < 0.05))
+        if "escala_duvidosa" in df:
+            marca("valor de mercado anulado (escala duvidosa; sem P/L e P/VP)", df["escala_duvidosa"].astype(bool))
         if "acoes_em_mil" in df:
             marca("ações em milhares na CVM, corrigidas x1000 (informativo)", df["acoes_em_mil"].astype(bool))
         marca("EBITDA < EBIT (D&A negativa)", df["ebitda_ltm"] < df["ebit_ltm"])
@@ -218,6 +220,16 @@ def main():
             txt(f"**{arq}**: {len(a)}")
             if len(a):
                 tabela(a[[c for c in ("ticker", "ret_12m", "dl_ebitda_com_arr", "p_l", "p_vp", "dy_12m", "score", "falhou") if c in a]], 40)
+
+    @secao("11. Lucro por ano (R$ mi) das quase aprovadas que só falham em lucro_estavel")
+    def _():
+        q = pd.read_csv(OUT / "quase_aprovadas.csv", dtype={"cnpj": str})
+        q = q[q["falhou"] == "lucro_estavel"].set_index("ticker")
+        cols = [f"ll_{a}" for a in ANOS_DFP] + ["ll_ltm"]
+        if q.empty:
+            txt("Nenhuma.")
+            return
+        tabela(q[cols].apply(mi), 25)
 
     destino = OUT / "relatorio_diagnostico.md"
     destino.write_text("\n".join(SAIDA), encoding="utf-8")
