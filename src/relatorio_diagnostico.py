@@ -17,7 +17,7 @@ from cvm_lib import ler_demonstracao
 CAMPOS = ["ll_2025", "ll_ltm", "receita_ltm", "ebit_ltm", "da_ltm", "ebitda_ltm", "caixa_ltm", "div_fin_ltm",
           "div_arr_ltm", "pl_ctrl_ltm", "acoes_on", "valor_mercado", "preco", "ret_12m",
           "dl_ebitda_com_arr", "p_l", "p_vp", "dy_12m"]
-EXTRA_RAW = ["SABESP", "KLABIN", "TELEFONICA BRASIL", "SUZANO", "PRIO"]   # sempre investigadas
+EXTRA_RAW = ["TIM S.A", "KLABIN", "SABESP", "SUZANO", "PRIO"]   # sempre investigadas
 MAX_LINHAS = 12          # limite de linhas por tabela
 MAX_RAW = 6              # empresas-problema com linhas brutas
 SAIDA = []
@@ -65,7 +65,7 @@ def linhas_brutas(zp, tipo, nome, prefixos, termos=None):
     if termos:
         m |= d["DS_CONTA"].str.contains(termos, case=False, regex=True, na=False)
     d = d.loc[m].assign(tipo=tipo, VL_mi=lambda x: (x["VL_CONTA"] / 1e6).round(1))
-    return d[["tipo", "consol", "VERSAO", "CD_CONTA", "DS_CONTA", "VL_mi"]]
+    return d[["DENOM_CIA", "tipo", "consol", "ESCALA_MOEDA", "VERSAO", "CD_CONTA", "DS_CONTA", "VL_mi"]]
 
 
 def main():
@@ -167,6 +167,9 @@ def main():
         marca("P/L < 1", df["p_l"] < 1)
         marca("DY > 30%", df["dy_12m"] > 0.30)
         marca("ações ON+PN = 0", (df["acoes_on"].fillna(0) + df["acoes_pn"].fillna(0)) <= 0)
+        marca("P/L ou P/VP < 0,05 (escala das ações; deveria ser 0)", (df["p_l"] < 0.05) | (df["p_vp"] < 0.05))
+        if "acoes_em_mil" in df:
+            marca("ações em milhares na CVM, corrigidas x1000 (informativo)", df["acoes_em_mil"].astype(bool))
         marca("EBITDA < EBIT (D&A negativa)", df["ebitda_ltm"] < df["ebit_ltm"])
         try:   # exercício que não é de 12 meses terminando em dezembro
             d = ler_demonstracao(RAW / "cvm" / f"dfp_{ANOS_DFP[-1]}.zip", "DRE")

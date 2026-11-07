@@ -8,6 +8,42 @@ import pandas as pd
 
 from common import ANOS_DFP, OUT
 
+LIMITE_ESCALA = 0.05   # P/VP ou P/L abaixo disso é impossível na prática: a CVM trouxe as ações em milhares
+
+
+def corrigir_escala_acoes(df):
+    """Multiplica por 1000 as ações (e o valor de mercado) das empresas que informam em milhares.
+
+    A composição do capital da CVM não traz escala e parte das empresas preenche em milhares (Renner:
+    961 mil ações, ABEV3: 15 milhões), o que deixava o valor de mercado 1000x menor e o P/L e P/VP ~0.
+    Sinais (qualquer um): P/VP ou P/L < LIMITE_ESCALA com lucro/PL positivos; ou, para units, valor de
+    mercado ~1/1000 do valor do Yahoo. Devolve a máscara das empresas corrigidas.
+    """
+    vm = df["valor_mercado"]
+    pl = df["pl_ctrl_ltm"].where(df["pl_ctrl_ltm"] > 0)
+    ll = df["ll_ltm"].where(df["ll_ltm"] > 0)
+    mil = (vm / pl < LIMITE_ESCALA) | (vm / ll < LIMITE_ESCALA) | (vm / df["mcap_yahoo"]).between(2e-4, 4e-3)
+    cols = ["acoes_on", "acoes_pn", "valor_mercado"]
+    df.loc[mil, cols] = df.loc[mil, cols] * 1000
+    df["acoes_em_mil"] = mil
+    df.loc[mil, "mcap_fonte"] += "_x1000"
+    return mil
+
+
+def checagens(df):
+    """Avisos de sanidade do dataset (não interrompem o pipeline)."""
+    ll = df[[f"ll_{a}" for a in ANOS_DFP] + ["ll_ltm"]]
+    testes = {
+        "EBITDA < EBIT (sinal da D&A)": df["ebitda_ltm"] < df["ebit_ltm"],
+        f"P/L ou P/VP < {LIMITE_ESCALA} (escala das ações)": (df["p_l"] < LIMITE_ESCALA) | (df["p_vp"] < LIMITE_ESCALA),
+        "lucro exatamente zero em algum ano (investigar)": (ll == 0).any(axis=1),
+    }
+    print("\nChecagens do dataset:")
+    for nome, m in testes.items():
+        n = int(m.sum())
+        exemplos = f" ({', '.join(df.loc[m, 'ticker'].head(6))})" if n else ""
+        print(f"  {'OK      ' if n == 0 else 'ATENÇÃO '}{nome}: {n}{exemplos}")
+
 
 def main():
     fund = pd.read_csv(OUT / "fundamentos.csv", dtype={"cnpj": str}).set_index("cnpj")
@@ -47,12 +83,16 @@ def main():
         df["mcap_yahoo"] = mu.groupby("cnpj")["mcap_yahoo"].max().reindex(df.index)
     df.loc[so_unit, "valor_mercado"] = df["preco_p"] * df["acoes_on"]
     df.loc[so_unit, "mcap_fonte"] = "unit_x_acoes_on"
+    mil = corrigir_escala_acoes(df)
+    print(f"Ações informadas em milhares na CVM (corrigidas x1000): {int(mil.sum())} empresas")
+    if mil.any():
+        print("  " + " ".join(df.loc[mil, "ticker"]))
     razao = df["valor_mercado"] / df["mcap_yahoo"]
     df["mcap_divergente"] = so_unit & ((razao > 1.5) | (razao < 0.67))
     df = df.join(dv, on="ticker")
 
     ult = ANOS_DFP[-1]
-    df["ebitda_ltm"] = df["ebit_ltm"] + df["da_ltm"]
+    df["ebitda_ltm"] = df["ebit_ltm"] + df["da_ltm"]                    # da já vem em módulo (02_fundamentos)
     df["dl_fin_ltm"] = df["div_fin_ltm"] - df["caixa_ltm"]              # sem arrendamentos
     df["dl_total_ltm"] = df["dl_fin_ltm"] + df["div_arr_ltm"]           # com arrendamentos
     pos = df["ebitda_ltm"] > 0
@@ -69,6 +109,7 @@ def main():
     print("Gravado:", OUT / "b3_dataset.csv", df.shape)
     print(df[["ticker", "preco", "valor_mercado", "ll_2025", "ll_ltm", "dl_ebitda_com_arr", "ret_12m"]]
           .sort_values("valor_mercado", ascending=False).head(10).to_string())
+    checagens(df)
 
     # validação: lucros anuais da Renner segundo agregadores (Suno/HG Brasil), em R$ milhões
     ref = {"ll_2021": 633.11, "ll_2022": 1291.70, "ll_2023": 976.26, "ll_2024": 1196.67, "ll_2025": 1457.57}
