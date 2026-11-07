@@ -28,7 +28,7 @@ Com o venv ativo o prompt mostra `(.venv)`. Em outro terminal, ative de novo ant
 
 ## Como rodar (na sua máquina, com internet)
 ```bash
-python src/run_all.py           # roda tudo (01 a 06; o 06 gera data/out/relatorio_diagnostico.md, pequeno, para enviar ao Claude); use --de N / --ate N / --so N para parte
+python src/run_all.py           # roda tudo (se pular passos com --de/--so e faltar arquivo de um passo anterior, avisa qual e de qual passo) (01 a 06; o 06 gera data/out/relatorio_diagnostico.md, pequeno, para enviar ao Claude); use --de N / --ate N / --so N para parte
 
 # ou passo a passo:
 python src/01_baixar_cvm.py     # ~100-200 MB, com cache

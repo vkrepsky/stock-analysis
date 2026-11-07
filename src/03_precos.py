@@ -34,7 +34,10 @@ def achar(cols, *inicios):
 
 
 def tickers_fca():
-    zp = sorted((RAW / "cvm").glob("fca_*.zip"))[-1]
+    zips = sorted((RAW / "cvm").glob("fca_*.zip"))
+    if not zips:
+        raise SystemExit("Falta data/raw/cvm/fca_*.zip (lista de tickers). Rode o passo 1: python src/run_all.py --so 1")
+    zp = zips[-1]
     with zipfile.ZipFile(zp) as z:
         nome = next(n for n in z.namelist() if "valor_mobiliario" in n.lower())
         with z.open(nome) as f:
