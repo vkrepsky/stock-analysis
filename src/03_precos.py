@@ -15,6 +15,7 @@ from common import OUT, RAW
 
 INICIO = "2020-12-01"
 LOTE = 25
+EXTRA_VEZES = 5      # pagamento > 5x a mediana dos pagamentos dos últimos 3 anos = extraordinário
 
 
 def norm(s):
@@ -51,6 +52,20 @@ def tickers_fca():
     return t.reset_index(drop=True)
 
 
+def dividendos_12m(df, fim):
+    """(total, recorrente) pagos nos últimos 12 meses (R$ por ação).
+
+    Recorrente = total sem os pagamentos extraordinários: os que passam de EXTRA_VEZES x a mediana dos
+    pagamentos dos últimos 3 anos (ex.: GRND3 pagou R$ 1,09 em dez/2025 contra ~R$ 0,09 nos demais,
+    73% do que a janela somava). Quem paga uma vez por ano tem mediana = o próprio pagamento: nada sai.
+    """
+    pagos = df["Dividends"][df["Dividends"] > 0]
+    h12 = pagos[pagos.index > fim - pd.Timedelta(days=365)]
+    ref = pagos[pagos.index > fim - pd.Timedelta(days=3 * 365)]
+    corte = EXTRA_VEZES * ref.median() if len(ref) else 0.0
+    return float(h12.sum()), float(h12[h12 <= corte].sum())
+
+
 def resumo_ticker(tk, df):
     """Métricas de preço, liquidez e dividendos de um ticker (df = OHLCV+Dividends do Yahoo)."""
     df = df.dropna(subset=["Close"])
@@ -62,12 +77,13 @@ def resumo_ticker(tk, df):
     ult = df["Close"].iloc[-1]
     base = ant["Close"].iloc[-1] if len(ant) else h12["Close"].iloc[0]
     base_aj = ant["Adj Close"].iloc[-1] if len(ant) else h12["Adj Close"].iloc[0]
+    div_total, div_rec = dividendos_12m(df, fim)
     r = {
         "ticker": tk, "dt_preco": fim.date(), "preco": ult,
         "ret_12m": ult / base - 1, "ret_12m_total": df["Adj Close"].iloc[-1] / base_aj - 1,
         "max_52w": h12["Close"].max(), "dist_max_52w": ult / h12["Close"].max() - 1,
         "liq_mediana_90d": (df["Close"] * df["Volume"]).tail(90).median(),
-        "div_12m": h12["Dividends"].sum(),
+        "div_12m": div_total, "div_12m_rec": div_rec,
     }
     div = df["Dividends"][df["Dividends"] > 0]
     por_ano = div.groupby(div.index.year).sum().rename(tk)
